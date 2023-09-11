@@ -3,7 +3,7 @@
 ## Overview
 The server listens on a specified interface and port, and handles incoming HTTP requests and redirects them to an OpenAI compatible API or Azure API based on the configuration. 
 
-![Diagram](img/diagram.png)
+![Diagram](img/readme.png)
 
 The server also includes a request interceptor mechanism, which allows you to modify the request data before it is sent to the OpenAI API. Currently, it includes a Google Search interceptor as an example.
 
