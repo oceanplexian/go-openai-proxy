@@ -1,0 +1,20 @@
+# Path to a TLS Cert
+certFile: "/path/to/cert/file.crt"
+keyFile: "/path/to/key/file.key"
+logLevel: "debug"  # Can be debug, info, warn, error, dpanic, panic, fatal
+
+# Define a list of interfaces that the Proxy listens on
+listeners:
+  - interface: "0.0.0.0"
+    port: "6001"
+
+upstreams:
+  Primary:
+    type: "azure"
+    model: "default"
+    url: "http://10.10.0.127:5001"
+    priority: 2
+  Secondary:
+    type: "openai"
+    model: "default"
+    priority: 1
