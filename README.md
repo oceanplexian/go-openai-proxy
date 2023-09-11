@@ -3,6 +3,8 @@
 ## Overview
 The server listens on a specified interface and port, and handles incoming HTTP requests and redirects them to an OpenAI compatible API or Azure API based on the configuration. 
 
+![Diagram](img/diagram.png)
+
 The server also includes a request interceptor mechanism, which allows you to modify the request data before it is sent to the OpenAI API. Currently, it includes a Google Search interceptor as an example.
 
 ## Features
@@ -76,12 +78,9 @@ upstreams:
 Here's some example output you can get out of the logger:
 ```
 $ go run cmd/main.go
-Debug: Added config to context in main.go: &{map[Primary:{azure http://10.10.0.127:5001 2} Secondary:{openai  1}] [{0.0.0.0 6001}]}
-{"level":"info","ts":1694269942.962039,"caller":"cmd/main.go:90","msg":"Hostname","hostname":"Administrators-MacBook-Pro.local"}
-{"level":"info","ts":1694269942.962371,"caller":"cmd/main.go:100","msg":"Starting listener","address":"0.0.0.0:6001"}
-Debug: Retrieved config from context in handlers.go: &{map[Primary:{azure http://10.10.0.127:5001 2} Secondary:{openai  1}] [{0.0.0.0 6001}]}, Type: *internal.Config
-Debug: Retrieved config from context in handlers.go: &{map[Primary:{azure http://10.10.0.127:5001 2} Secondary:{openai  1}] [{0.0.0.0 6001}]}, Type: *internal.Config
-{"level":"info","ts":1694269949.982666,"caller":"internal/handlers.go:90","msg":"JSON Response Segment","content":""}
+2023-09-10T18:38:20.628-0600	DEBUG	cmd/main.go:101	Added config to context: 	{"config": {"Upstreams":{"Primary":{"Type":"azure","URL":"http://10.10.0.127:5001","Model":"default","Priority":2},"Secondary":{"Type":"openai","URL":"","Model":"default","Priority":1}},"Listeners":[{"Interface":"0.0.0.0","Port":"6001"}],"LogLevel":"debug","CertFile":"/path/to/cert/file.crt","KeyFile":"/path/to/key/file.key","UseTLS":false}}
+2023-09-10T18:38:20.628-0600	INFO	cmd/main.go:113	Hostname	{"hostname": "Administrators-MacBook-Pro.local"}
+2023-09-10T18:38:20.628-0600	INFO	cmd/main.go:123	Starting listener	{"address": "0.0.0.0:6001"}{"level":"info","ts":1694269949.982666,"caller":"internal/handlers.go:90","msg":"JSON Response Segment","content":""}
 {"level":"info","ts":1694269949.983812,"caller":"internal/handlers.go:90","msg":"JSON Response Segment","content":"Hello"}
 {"level":"info","ts":1694269950.029989,"caller":"internal/handlers.go:90","msg":"JSON Response Segment","content":"!"}
 {"level":"info","ts":1694269950.205655,"caller":"internal/handlers.go:90","msg":"JSON Response Segment","content":" How"}
