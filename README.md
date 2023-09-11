@@ -17,7 +17,7 @@ The server also includes a request interceptor mechanism, which allows you to mo
 
 ## Installation
 ```bash
-git clone https://github.com/your-repo/go-openai-proxy.git
+git clone https://github.com/go-openai-proxy/go-openai-proxy.git
 cd go-openai-proxy
 go get -u
 go build
