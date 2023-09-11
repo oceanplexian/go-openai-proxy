@@ -38,7 +38,7 @@ func CreateOpenAIChatCompletionStream(messages []openai.ChatCompletionMessage, m
 		defer close(responseChannel)
 
 		// Initialize the OpenAI client
-		client := openai.NewClient("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")
+		client := openai.NewClient("xxx")
 
 		ctx := context.Background()
 
