@@ -4,137 +4,151 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/oceanplexian/go-openai-proxy/internal"
-	"go.uber.org/zap"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
+	"time"
+
+	//"github.com/k0kubun/pp/v3"
+	"github.com/oceanplexian/go-openai-proxy/internal"
+	log "github.com/sirupsen/logrus"
+)
+
+const (
+	ReadTimeout  = 10 * time.Second
+	WriteTimeout = 10 * time.Second
 )
 
 func main() {
+	var configPath, cliListeners, logLevel, certFile, keyFile string
 
-	// Command-line overrides
-	var configPath, cliListeners string
-	var certFile, keyFile string
-	var logLevel string
 	var useTLS bool
 
 	flag.StringVar(&configPath, "config", "config.yaml", "Path to the configuration file")
-	flag.StringVar(&cliListeners, "listeners", "", "Comma-separated list of listeners to override config (format: iface:port,iface:port,...)")
-	flag.StringVar(&logLevel, "logLevel", "", "Log level (debug, info, warn, error, dpanic, panic, fatal)")
+	flag.StringVar(&cliListeners, "listeners", "", "Comma-separated list of listeners to override config")
+	flag.StringVar(&logLevel, "logLevel", "", "Log level")
 	flag.StringVar(&certFile, "certFile", "", "Path to the certificate file")
 	flag.StringVar(&keyFile, "keyFile", "", "Path to the key file")
-	flag.BoolVar(&useTLS, "useTLS", true, "Whether to use TLS")
-
+	flag.BoolVar(&useTLS, "useTLS", false, "Whether to use TLS")
 	flag.Parse()
 
-	// Load configuration
 	cfg, err := internal.LoadConfig(configPath)
 	if err != nil {
-		panic("Couldn't load configuration")
+		log.Fatal("Couldn't load configuration: ", err)
 	}
-	if logLevel != "" {
-		cfg.LogLevel = logLevel
-	}
+
+	cfg.UseTLS = useTLS
+
 	if certFile != "" {
 		cfg.CertFile = certFile
 	}
+
+	if logLevel != "" {
+		cfg.LogLevel = logLevel
+	}
+
 	if keyFile != "" {
 		cfg.KeyFile = keyFile
 	}
-	// TLS is enabled by default, but can be disabled with a flag for testing
-	if !useTLS {
-		cfg.UseTLS = useTLS
-	}
-	fmt.Println("Loaded log level from config:", cfg.LogLevel)
 
-	// Validate upstreams and collect priorities
-	prioritySet := make(map[int]bool)
-	for name, upstream := range cfg.Upstreams {
-		if upstream.Type != "azure" && upstream.Type != "openai" {
-			fmt.Printf("Invalid type for upstream %s: %s\n", name, upstream.Type)
-			return
-		}
-		if upstream.Type == "azure" && upstream.URL == "" {
-			fmt.Printf("Missing URL for Azure upstream %s\n", name)
-			return
-		}
-		if upstream.Type == "openai" && upstream.URL != "" {
-			fmt.Printf("URL should not be provided for OpenAI upstream %s\n", name)
-			return
-		}
-		if upstream.Priority <= 0 {
-			fmt.Printf("Invalid priority for upstream %s: %d\n", name, upstream.Priority)
-			return
-		}
-		if _, exists := prioritySet[upstream.Priority]; exists {
-			fmt.Printf("Duplicate priority for upstream %s: %d\n", name, upstream.Priority)
-			return
-		}
-		prioritySet[upstream.Priority] = true
-	}
-
-	// If listeners are provided via CLI, override the ones from the config
 	if cliListeners != "" {
-		cfg.Listeners = []internal.Listener{}
-		for _, cliListener := range strings.Split(cliListeners, ",") {
-			parts := strings.Split(cliListener, ":")
-			if len(parts) != 2 {
-				fmt.Println("Invalid listener format, skipping:", cliListener)
-				continue
-			}
-			cfg.Listeners = append(cfg.Listeners, internal.Listener{Interface: parts[0], Port: parts[1]})
-		}
+		overrideListeners(cfg, cliListeners)
 	}
 
-	// Initialize logger
-	logger, err := internal.InitializeLogger(cfg.LogLevel)
+	// Initialize the logger in logger.go
+	logger, err := internal.InitializeLogger(logLevel)
 	if err != nil {
-		panic("Couldn't initialize logger")
+		log.Fatal("Couldn't initialize logger: ", err)
 	}
-	defer logger.Sync()
+	ctx := createContext(cfg, logger)
 
-	// Create context with logger and config
-	ctx := context.WithValue(context.Background(), "logger", logger)
-	ctx = context.WithValue(ctx, "config", cfg)
-	logger.Debug("Added config to context: ", zap.Any("config", ctx.Value("config")))
-
-	// Register HTTP handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		internal.Response(ctx, w, r)
 	})
 
-	// Get hostname
-	hostname, err := os.Hostname()
-	if err != nil {
-		logger.Error("Could not get hostname", zap.Error(err))
+	startListeners(ctx, cfg)
+}
+
+func overrideListeners(cfg *internal.Config, cliListeners string) {
+	const ExpectedParts = 2
+
+	cfg.Listeners = []internal.Listener{}
+
+	for _, cliListener := range strings.Split(cliListeners, ",") {
+		parts := strings.Split(cliListener, ":")
+		isValidFormat := len(parts) == ExpectedParts
+
+		if !isValidFormat {
+			log.Error("Invalid listener format, skipping: ", cliListener)
+
+			continue
+		}
+
+		newListener := internal.Listener{Interface: parts[0], Port: parts[1]}
+		cfg.Listeners = append(cfg.Listeners, newListener)
+	}
+}
+
+func createContext(cfg *internal.Config, logger *log.Logger) context.Context {
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, "logger", logger)
+	ctx = context.WithValue(ctx, "config", cfg)
+
+	return ctx
+}
+
+// startListener uses a logger from the context for logging.
+func startListener(ctx context.Context, listener internal.Listener, cfg *internal.Config) {
+	// Extract logger from context
+	logger, ok := ctx.Value("logger").(*log.Logger)
+	if !ok {
+		// Handle the case where the logger is not in the context.
+		// In a real application, you may want to handle this more gracefully.
+		fmt.Println("Logger not found in context")
+		return
+	}
+
+	address := fmt.Sprintf("%s:%s", listener.Interface, listener.Port)
+
+	defaultTimeout := 10 * time.Second
+
+	server := &http.Server{
+		Addr:         address,
+		Handler:      nil,
+		ReadTimeout:  defaultTimeout,
+		WriteTimeout: defaultTimeout,
+	}
+
+	if cfg.UseTLS {
+		logger.WithFields(log.Fields{"address": address}).Info("Starting TLS listener")
+		logger.WithFields(log.Fields{"certFile": cfg.CertFile, "keyFile": cfg.KeyFile}).Info("Loading certificates")
+
+		err := server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			logger.WithFields(log.Fields{"address": address, "error": err}).Error("ListenAndServeTLS")
+		}
 	} else {
-		logger.Info("Hostname", zap.String("hostname", hostname))
-	}
+		logger.WithFields(log.Fields{"address": address}).Info("Starting listener")
 
-	// Start listeners based on configuration
-	var wg sync.WaitGroup
+		err := server.ListenAndServe()
+		if err != nil {
+			logger.WithFields(log.Fields{"address": address, "error": err}).Error("ListenAndServe")
+		}
+	}
+}
+
+// startListeners starts all listeners and uses the context for logging.
+func startListeners(ctx context.Context, cfg *internal.Config) {
+	var listenerWaitGroup sync.WaitGroup
 	for _, listener := range cfg.Listeners {
-		wg.Add(1)
-		go func(listener internal.Listener) {
-			defer wg.Done()
-			address := fmt.Sprintf("%s:%s", listener.Interface, listener.Port)
-			logger.Info("Starting listener", zap.String("address", address))
+		listenerWaitGroup.Add(1)
 
-			if cfg.UseTLS {
-				err := http.ListenAndServeTLS(address, cfg.CertFile, cfg.KeyFile, nil)
-				if err != nil {
-					logger.Error("ListenAndServeTLS: ", zap.String("address", address), zap.Error(err))
-				}
-			} else {
-				err := http.ListenAndServe(address, nil)
-				if err != nil {
-					logger.Error("ListenAndServe: ", zap.String("address", address), zap.Error(err))
-				}
-			}
-		}(listener)
+		listenerFunc := func(listener internal.Listener) {
+			defer listenerWaitGroup.Done()
+			startListener(ctx, listener, cfg)
+		}
+		go listenerFunc(listener)
 	}
 
-	wg.Wait()
+	listenerWaitGroup.Wait()
 }

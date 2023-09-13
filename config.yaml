@@ -14,7 +14,9 @@ upstreams:
     model: "default"
     url: "http://10.10.0.127:5001"
     priority: 2
+    apiKey: "dummy"
   Secondary:
     type: "openai"
     model: "default"
     priority: 1
+    apiKey: "dummy"

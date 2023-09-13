@@ -3,47 +3,73 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"io"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 )
 
-// Reads Data from the Client
-func ReadAndUnmarshalBody(ctx context.Context, r *http.Request, w http.ResponseWriter) (RequestData, error) {
+// Define static errors.
+var (
+	ErrJSONUnmarshalFailed  = errors.New("json.Unmarshal failed")
+	ErrJSONMarshalFailed    = errors.New("json.MarshalIndent failed")
+	ErrLoggerNotFound       = errors.New("logger not found in context")
+	ErrInvalidRequestFormat = errors.New("invalid request format")
+)
+
+// Reads Data from the Client.
+func ReadAndUnmarshalBody(ctx context.Context, request *http.Request, writer http.ResponseWriter) (RequestData, error) {
 	var requestData RequestData
 
-	logger, ok := ctx.Value("logger").(*zap.Logger)
+	logger, ok := ctx.Value("logger").(*log.Logger)
 	if !ok {
-		http.Error(w, "Logger not found in context", http.StatusInternalServerError)
-		return requestData, fmt.Errorf("Logger not found in context")
+		http.Error(writer, "Internal Service Error", http.StatusInternalServerError)
+		return requestData, fmt.Errorf("context issue: %w", ErrLoggerNotFound)
 	}
 
 	// Read the request body
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(request.Body)
 	if err != nil {
 		errorResponse := map[string]interface{}{
 			"status":  "error",
-			"message": "Error reading request body",
+			"message": "error reading request body",
 		}
-		errorData, _ := json.MarshalIndent(errorResponse, "", "  ")
-		http.Error(w, string(errorData), http.StatusInternalServerError)
-		logger.Error("Error reading request body", zap.String("raw_body", string(body)), zap.Error(err))
-		return requestData, err
-	}
-	defer r.Body.Close()
+		errorData, marshalErr := json.MarshalIndent(errorResponse, "", "  ")
 
-	// Check Content-Type
-	contentType := r.Header.Get("Content-Type")
+		if marshalErr != nil {
+			logger.WithFields(log.Fields{"error": marshalErr}).Error("failed to marshal JSON")
+			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+
+			return requestData, fmt.Errorf("json.MarshalIndent failed: %w", marshalErr)
+		}
+
+		http.Error(writer, string(errorData), http.StatusInternalServerError)
+
+		return requestData, fmt.Errorf("io.ReadAll failed: %w", err)
+	}
+	defer request.Body.Close()
+
+	// Check Content-Type and error if it's not a JSON payload
+	contentType := request.Header.Get("Content-Type")
 	if contentType != "application/json" {
 		errorResponse := map[string]interface{}{
 			"status":  "error",
 			"message": "Invalid request format. Please send a JSON payload.",
 		}
-		errorData, _ := json.MarshalIndent(errorResponse, "", "  ")
-		http.Error(w, string(errorData), http.StatusBadRequest)
-		logger.Error("Invalid request format", zap.String("raw_body", string(body)))
-		return requestData, fmt.Errorf("Invalid request format")
+		errorData, err := json.MarshalIndent(errorResponse, "", "  ")
+
+		if err != nil {
+			logger.WithFields(log.Fields{"error": err}).Error("Failed to marshal JSON")
+			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+
+			return requestData, fmt.Errorf("json.MarshalIndent failed: %w", err)
+		}
+
+		http.Error(writer, string(errorData), http.StatusBadRequest)
+
+		return requestData, ErrInvalidRequestFormat
 	}
 
 	// Try to unmarshal the body into the requestData struct
@@ -53,17 +79,26 @@ func ReadAndUnmarshalBody(ctx context.Context, r *http.Request, w http.ResponseW
 			"status":  "error",
 			"message": "Error parsing JSON payload",
 		}
-		errorData, _ := json.MarshalIndent(errorResponse, "", "  ")
-		http.Error(w, string(errorData), http.StatusBadRequest)
-		logger.Error("Error parsing JSON payload", zap.String("raw_body", string(body)), zap.Error(err))
-		return requestData, err
+		errorData, marshalErr := json.MarshalIndent(errorResponse, "", "  ")
+
+		if marshalErr != nil {
+			logger.WithFields(log.Fields{"error": marshalErr}).Error("Failed to marshal JSON")
+			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+
+			return requestData, fmt.Errorf("%w: %v", ErrJSONMarshalFailed, marshalErr)
+		}
+
+		http.Error(writer, string(errorData), http.StatusBadRequest)
+		logger.WithFields(log.Fields{"error": err, "body": string(body)}).Error("Error parsing JSON payload")
+
+		return requestData, fmt.Errorf("%w: %v", ErrJSONUnmarshalFailed, err)
 	}
 
 	return requestData, nil
 }
 
-func createJsonResponse(content string, isClosing bool) JsonResponse {
-	commonFields := JsonResponse{
+func createJSONResponse(content string, isClosing bool) JSONResponse {
+	commonFields := JSONResponse{
 		ID:      "chatcmpl-1692118020279965440",
 		Object:  "chat.completions.chunk",
 		Created: 1692118020,
@@ -110,14 +145,14 @@ func createJsonResponse(content string, isClosing bool) JsonResponse {
 	return commonFields
 }
 
-// Create a function to send JsonResponse
-func sendJsonResponse(w http.ResponseWriter, resp JsonResponse, flusher http.Flusher) {
+// Create a function to send JSONResponse.
+func sendJSONResponse(writer http.ResponseWriter, resp JSONResponse, flusher http.Flusher) {
 	data, err := json.Marshal(resp)
 	if err != nil {
-		http.Error(w, "Error creating JSON response", http.StatusInternalServerError)
+		http.Error(writer, "Error creating JSON response", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Fprintf(w, "data: %s\r\n\r\n", data)
+	fmt.Fprintf(writer, "data: %s\r\n\r\n", data)
 	flusher.Flush()
 }

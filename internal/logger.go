@@ -1,39 +1,42 @@
 package internal
 
 import (
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"fmt"
+	"os"
+
+	log "github.com/sirupsen/logrus"
 )
 
-func InitializeLogger(logLevel string) (*zap.Logger, error) {
-	var cfg zap.Config
-	if logLevel == "debug" {
-		cfg = zap.NewDevelopmentConfig()
-	} else {
-		cfg = zap.NewProductionConfig()
+// InitializeLogger initializes the logger with the given log level and other settings.
+func InitializeLogger(logLevel string) (*log.Logger, error) {
+	if logLevel == "" {
+		logLevel = "info" // Default log level
 	}
 
-	cfg.Level = zap.NewAtomicLevelAt(zapLevel(logLevel))
-	return cfg.Build()
-}
+	// Create a new instance of the logger
+	logger := log.New()
 
-func zapLevel(level string) zapcore.Level {
-	switch level {
-	case "debug":
-		return zap.DebugLevel
-	case "info":
-		return zap.InfoLevel
-	case "warn":
-		return zap.WarnLevel
-	case "error":
-		return zap.ErrorLevel
-	case "dpanic":
-		return zap.DPanicLevel
-	case "panic":
-		return zap.PanicLevel
-	case "fatal":
-		return zap.FatalLevel
-	default:
-		return zap.InfoLevel
+	// Set log output to stdout
+	logger.SetOutput(os.Stdout)
+
+	// Set JSON formatter
+	logger.SetFormatter(&log.JSONFormatter{
+		TimestampFormat:   "",
+		DisableTimestamp:  false,
+		DisableHTMLEscape: false,
+		DataKey:           "",
+		FieldMap:          nil,
+		CallerPrettyfier:  nil,
+		PrettyPrint:       false,
+	})
+
+	// Parse and set log level
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse log level: %w", err)
 	}
+
+	logger.SetLevel(level)
+
+	return logger, nil
 }

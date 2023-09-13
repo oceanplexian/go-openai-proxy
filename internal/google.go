@@ -2,31 +2,37 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"go.uber.org/zap"
-
-	"github.com/rocketlaunchr/google-search"
 	"strings"
+
+	googlesearch "github.com/rocketlaunchr/google-search"
+	log "github.com/sirupsen/logrus"
 )
 
-// Interceptor function
+// Define static errors.
+var (
+	ErrRequestDataNil      = errors.New("requestData is nil")
+	ErrRequestDataMessages = errors.New("requestData.Messages is nil")
+)
+
+// Interceptor function.
 func GoogleSearchInterceptor(ctx context.Context, requestData *RequestData) error {
 	if requestData == nil {
-		return fmt.Errorf("requestData is nil")
-	}
-	if requestData.Messages == nil {
-		return fmt.Errorf("requestData.Messages is nil")
+		return fmt.Errorf("%w", ErrRequestDataNil)
 	}
 
-	logger, ok := ctx.Value("logger").(*zap.Logger)
-	if !ok {
-		return fmt.Errorf("Logger not found in context")
+	if requestData.Messages == nil {
+		return fmt.Errorf("%w", ErrRequestDataMessages)
 	}
-	for i := len(requestData.Messages) - 1; i >= 0; i-- {
-		// Experimental logic for for searching Google
-		if strings.Contains(requestData.Messages[i].Content, "search google for") {
-			index := strings.Index(requestData.Messages[i].Content, "search google for")
-			afterSearchPhrase := requestData.Messages[i].Content[index+len("search google for "):]
+
+	logger, _ := ctx.Value("logger").(*log.Logger) // Type assertion for Logrus
+
+	for message := len(requestData.Messages) - 1; message >= 0; message-- {
+		// Experimental logic for searching Google
+		if strings.Contains(requestData.Messages[message].Content, "search google for") {
+			index := strings.Index(requestData.Messages[message].Content, "search google for")
+			afterSearchPhrase := requestData.Messages[message].Content[index+len("search google for "):]
 
 			startQuoteIndex := strings.Index(afterSearchPhrase, "\"")
 			endQuoteIndex := strings.LastIndex(afterSearchPhrase, "\"")
@@ -34,35 +40,38 @@ func GoogleSearchInterceptor(ctx context.Context, requestData *RequestData) erro
 			if startQuoteIndex != -1 && endQuoteIndex != -1 && startQuoteIndex < endQuoteIndex {
 				searchQuery := afterSearchPhrase[startQuoteIndex+1 : endQuoteIndex]
 
-				searchResult, err := PerformGoogleSearch(searchQuery)
+				searchResult, err := PerformGoogleSearch(ctx, searchQuery)
 				if err == nil {
-					logger.Info("Google Result", zap.String("result", string(searchResult)))
-					requestData.Messages[i].Content += "\n\nThe google search results are: ```" + searchResult + "``` use them to answer the user's question."
+					logger.WithFields(log.Fields{"result": searchResult}).Info("Google Result Found")
+
+					requestData.Messages[message].Content += "\n\nThe google search results are: ```" +
+						searchResult + "``` use them to answer the user's question."
 				}
+
 				break
 			}
 		}
-		// Finish experimental logic
 	}
+
 	return nil
 }
 
-// Function to perform a Google search using the rocketlaunchr/google-search package
-func PerformGoogleSearch(query string) (string, error) {
-	// Perform the Google search and return the result
-	results, err := googlesearch.Search(nil, query)
+// Function to perform a Google search using the rocketlaunchr/google-search package.
+func PerformGoogleSearch(ctx context.Context, query string) (string, error) {
+	results, err := googlesearch.Search(ctx, query) // pass the context instead of nil
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to perform Google search: %w", err) // Wrap the external error
 	}
 
 	// Convert the results to a string
-	var sb strings.Builder
+	var stringsBuilder strings.Builder
 	for i, result := range results {
-		sb.WriteString(fmt.Sprintf("%d. %s - %s - %s\n", i+1, result.Title, result.URL, result.Description))
+		stringsBuilder.WriteString(fmt.Sprintf("%d. %s - %s - %s\n", i+1, result.Title, result.URL, result.Description))
+
 		if i >= 4 { // Limit to top 5 results
 			break
 		}
 	}
 
-	return sb.String(), nil
+	return stringsBuilder.String(), nil
 }
