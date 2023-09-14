@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type RequestInterceptor func(ctx context.Context, requestData *RequestData) error
+type RequestInterceptor func(cfg *Config, logger *log.Logger, requestData *RequestData) error
 
 // You can define a list of interceptors here, if you like.
 var interceptors = []RequestInterceptor{
@@ -44,10 +43,7 @@ func HandleOptionsRequest(w http.ResponseWriter) {
 	}
 }
 
-func Response(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	cfg, _ := ctx.Value("config").(*Config)
-	logger, _ := ctx.Value("logger").(*log.Logger) // Type assertion for Logrus
-
+func Response(cfg *Config, logger *log.Logger, w http.ResponseWriter, r *http.Request) {
 	SetCommonHeaders(w)
 
 	if r.Method == "OPTIONS" {
@@ -55,7 +51,7 @@ func Response(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestData, err := ReadAndUnmarshalBody(ctx, r, w)
+	requestData, err := ReadAndUnmarshalBody(cfg, logger, w, r)
 	if err != nil {
 		logger.WithFields(log.Fields{"error": err}).Error("Error reading or parsing request body")
 		return
@@ -63,7 +59,7 @@ func Response(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 
 	// Run through interceptors
 	for _, interceptor := range interceptors {
-		if err := interceptor(ctx, &requestData); err != nil {
+		if err := interceptor(cfg, logger, &requestData); err != nil {
 			logger.WithFields(log.Fields{"error": err}).Error("Error running interceptor")
 			return
 		}
@@ -72,7 +68,7 @@ func Response(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	// Here, upstreamName would be a string that you capture once at the start,
 	// assuming all segments in the conversation are from the same upstream
 
-	responseChannel, upstreamName := CreateChatCompletionStream(ctx, cfg.Upstreams, requestData.Messages, requestData.MaxTokens)
+	responseChannel, upstreamName := CreateChatCompletionStream(cfg, logger, cfg.Upstreams, requestData.Messages, requestData.MaxTokens)
 	flusher, ok := w.(http.Flusher)
 
 	if !ok {

@@ -5,11 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
-	//"github.com/k0kubun/pp/v3"
 	"github.com/oceanplexian/go-openai-proxy/internal"
 	log "github.com/sirupsen/logrus"
 )
@@ -44,7 +44,7 @@ func main() {
 	}
 
 	if logLevel != "" {
-		cfg.LogLevel = logLevel
+		cfg.LogConfig.LogLevel = logLevel
 	}
 
 	if keyFile != "" {
@@ -56,17 +56,18 @@ func main() {
 	}
 
 	// Initialize the logger in logger.go
-	logger, err := internal.InitializeLogger(logLevel)
+	logger, err := internal.InitializeLogger(&cfg.LogConfig)
+
 	if err != nil {
-		log.Fatal("Couldn't initialize logger: ", err)
+		fmt.Println("Failed to initialize logger:", err) //nolint
+		os.Exit(1)
 	}
-	ctx := createContext(cfg, logger)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		internal.Response(ctx, w, r)
+		internal.Response(cfg, logger, w, r)
 	})
 
-	startListeners(ctx, cfg)
+	startListeners(cfg, logger)
 }
 
 func overrideListeners(cfg *internal.Config, cliListeners string) {
@@ -98,16 +99,7 @@ func createContext(cfg *internal.Config, logger *log.Logger) context.Context {
 }
 
 // startListener uses a logger from the context for logging.
-func startListener(ctx context.Context, listener internal.Listener, cfg *internal.Config) {
-	// Extract logger from context
-	logger, ok := ctx.Value("logger").(*log.Logger)
-	if !ok {
-		// Handle the case where the logger is not in the context.
-		// In a real application, you may want to handle this more gracefully.
-		fmt.Println("Logger not found in context")
-		return
-	}
-
+func startListener(cfg *internal.Config, logger *log.Logger, listener internal.Listener) {
 	address := fmt.Sprintf("%s:%s", listener.Interface, listener.Port)
 
 	defaultTimeout := 10 * time.Second
@@ -138,14 +130,14 @@ func startListener(ctx context.Context, listener internal.Listener, cfg *interna
 }
 
 // startListeners starts all listeners and uses the context for logging.
-func startListeners(ctx context.Context, cfg *internal.Config) {
+func startListeners(cfg *internal.Config, logger *log.Logger) {
 	var listenerWaitGroup sync.WaitGroup
 	for _, listener := range cfg.Listeners {
 		listenerWaitGroup.Add(1)
 
 		listenerFunc := func(listener internal.Listener) {
 			defer listenerWaitGroup.Done()
-			startListener(ctx, listener, cfg)
+			startListener(cfg, logger, listener)
 		}
 		go listenerFunc(listener)
 	}

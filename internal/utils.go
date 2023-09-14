@@ -1,9 +1,7 @@
 package internal
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,46 +11,40 @@ import (
 
 // Define static errors.
 var (
-	ErrJSONUnmarshalFailed  = errors.New("json.Unmarshal failed")
-	ErrJSONMarshalFailed    = errors.New("json.MarshalIndent failed")
-	ErrLoggerNotFound       = errors.New("logger not found in context")
-	ErrInvalidRequestFormat = errors.New("invalid request format")
+	ErrJSONUnmarshalFailed  = fmt.Errorf("json.Unmarshal failed")
+	ErrJSONMarshalFailed    = fmt.Errorf("json.MarshalIndent failed")
+	ErrLoggerNotFound       = fmt.Errorf("logger not found in context")
+	ErrInvalidRequestFormat = fmt.Errorf("invalid request format")
 )
 
 // Reads Data from the Client.
-func ReadAndUnmarshalBody(ctx context.Context, request *http.Request, writer http.ResponseWriter) (RequestData, error) {
+func ReadAndUnmarshalBody(cfg *Config, logger *log.Logger, resp http.ResponseWriter, req *http.Request) (RequestData, error) {
 	var requestData RequestData
 
-	logger, ok := ctx.Value("logger").(*log.Logger)
-	if !ok {
-		http.Error(writer, "Internal Service Error", http.StatusInternalServerError)
-		return requestData, fmt.Errorf("context issue: %w", ErrLoggerNotFound)
-	}
-
 	// Read the request body
-	body, err := io.ReadAll(request.Body)
+	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		errorResponse := map[string]interface{}{
 			"status":  "error",
 			"message": "error reading request body",
 		}
-		errorData, marshalErr := json.MarshalIndent(errorResponse, "", "  ")
+		err, marshalErr := json.MarshalIndent(errorResponse, "", "  ")
 
-		if marshalErr != nil {
+		if err != nil {
 			logger.WithFields(log.Fields{"error": marshalErr}).Error("failed to marshal JSON")
-			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+			http.Error(resp, "Internal Server Error", http.StatusInternalServerError)
 
 			return requestData, fmt.Errorf("json.MarshalIndent failed: %w", marshalErr)
 		}
 
-		http.Error(writer, string(errorData), http.StatusInternalServerError)
+		http.Error(resp, string(err), http.StatusInternalServerError)
 
 		return requestData, fmt.Errorf("io.ReadAll failed: %w", err)
 	}
-	defer request.Body.Close()
+	defer req.Body.Close()
 
 	// Check Content-Type and error if it's not a JSON payload
-	contentType := request.Header.Get("Content-Type")
+	contentType := req.Header.Get("Content-Type")
 	if contentType != "application/json" {
 		errorResponse := map[string]interface{}{
 			"status":  "error",
@@ -62,12 +54,12 @@ func ReadAndUnmarshalBody(ctx context.Context, request *http.Request, writer htt
 
 		if err != nil {
 			logger.WithFields(log.Fields{"error": err}).Error("Failed to marshal JSON")
-			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+			http.Error(resp, "Internal Server Error", http.StatusInternalServerError)
 
 			return requestData, fmt.Errorf("json.MarshalIndent failed: %w", err)
 		}
 
-		http.Error(writer, string(errorData), http.StatusBadRequest)
+		http.Error(resp, string(errorData), http.StatusBadRequest)
 
 		return requestData, ErrInvalidRequestFormat
 	}
@@ -83,12 +75,12 @@ func ReadAndUnmarshalBody(ctx context.Context, request *http.Request, writer htt
 
 		if marshalErr != nil {
 			logger.WithFields(log.Fields{"error": marshalErr}).Error("Failed to marshal JSON")
-			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+			http.Error(resp, "Internal Server Error", http.StatusInternalServerError)
 
 			return requestData, fmt.Errorf("%w: %v", ErrJSONMarshalFailed, marshalErr)
 		}
 
-		http.Error(writer, string(errorData), http.StatusBadRequest)
+		http.Error(resp, string(errorData), http.StatusBadRequest)
 		logger.WithFields(log.Fields{"error": err, "body": string(body)}).Error("Error parsing JSON payload")
 
 		return requestData, fmt.Errorf("%w: %v", ErrJSONUnmarshalFailed, err)

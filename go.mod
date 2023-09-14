@@ -35,6 +35,7 @@ require (
 	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.13.0 // indirect
+	golift.io/rotatorr v0.0.0-20230911015553-cd2abbd726c7 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	mvdan.cc/gofumpt v0.5.0 // indirect
