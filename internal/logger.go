@@ -5,38 +5,45 @@ import (
 	"os"
 
 	log "github.com/sirupsen/logrus"
+	"golift.io/rotatorr"
+	"golift.io/rotatorr/timerotator"
+)
+
+var (
+	ErrInvalidFileSettings = fmt.Errorf("invalid file settings for log output")
+	ErrInvalidLogLevel     = fmt.Errorf("failed to parse log level")
+	ErrInvalidLogOutput    = fmt.Errorf("invalid log output setting")
 )
 
 // InitializeLogger initializes the logger with the given log level and other settings.
-func InitializeLogger(logLevel string) (*log.Logger, error) {
-	if logLevel == "" {
-		logLevel = "info" // Default log level
-	}
-
-	// Create a new instance of the logger
+func InitializeLogger(cfg *LogConfig) (*log.Logger, error) {
 	logger := log.New()
+	logger.SetFormatter(&log.JSONFormatter{})
 
-	// Set log output to stdout
-	logger.SetOutput(os.Stdout)
-
-	// Set JSON formatter
-	logger.SetFormatter(&log.JSONFormatter{
-		TimestampFormat:   "",
-		DisableTimestamp:  false,
-		DisableHTMLEscape: false,
-		DataKey:           "",
-		FieldMap:          nil,
-		CallerPrettyfier:  nil,
-		PrettyPrint:       false,
-	})
-
-	// Parse and set log level
-	level, err := log.ParseLevel(logLevel)
+	// Parse log level
+	level, err := log.ParseLevel(cfg.LogLevel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse log level: %w", err)
+		return nil, ErrInvalidLogLevel
 	}
 
 	logger.SetLevel(level)
+
+	switch cfg.LogOutput {
+	case "stdout":
+		logger.SetOutput(os.Stdout)
+	case "file":
+		if cfg.Filepath == "" || cfg.Filesize == 0 || cfg.FileCount == 0 {
+			return nil, ErrInvalidFileSettings
+		}
+
+		logger.SetOutput(rotatorr.NewMust(&rotatorr.Config{
+			FileSize: cfg.Filesize,
+			Filepath: cfg.Filepath,
+			Rotatorr: &timerotator.Layout{FileCount: cfg.FileCount},
+		}))
+	default:
+		return nil, ErrInvalidLogOutput
+	}
 
 	return logger, nil
 }

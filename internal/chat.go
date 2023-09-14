@@ -13,19 +13,12 @@ import (
 // CreateChatCompletionStream creates a chat completion stream based on the given upstreams and messages,
 // by Default it will use the upstream with the lowest "priority number" and send requests to that one.
 func CreateChatCompletionStream(
-	ctx context.Context,
+	cfg *Config,
+	logger *log.Logger,
 	upstreams map[string]Upstream,
 	messages []openai.ChatCompletionMessage,
 	maxTokens int,
-) (<-chan string, string) { // Modified to return an additional string value
-	logger, _ := ctx.Value("logger").(*log.Logger)
-	cfg, ok := ctx.Value("config").(*Config)
-
-	if !ok {
-		logger.Error("No config found in context")
-		return nil, ""
-	}
-
+) (<-chan string, string) {
 	lowestPriority := math.MaxInt
 	var selectedUpstream Upstream
 
@@ -43,9 +36,9 @@ func CreateChatCompletionStream(
 
 	switch selectedUpstream.Type {
 	case "azure":
-		channel = CreateAzureChatCompletionStream(ctx, selectedUpstream.APIKey, selectedUpstream.URL, messages, maxTokens)
+		channel = CreateAzureChatCompletionStream(cfg, logger, selectedUpstream.APIKey, selectedUpstream.URL, messages, maxTokens)
 	case "openai":
-		channel = CreateOpenAIChatCompletionStream(ctx, selectedUpstream.APIKey, messages, maxTokens)
+		channel = CreateOpenAIChatCompletionStream(cfg, logger, selectedUpstream.APIKey, messages, maxTokens)
 	default:
 		logger.Error("Invalid upstream type")
 		return nil, ""
@@ -56,13 +49,12 @@ func CreateChatCompletionStream(
 
 // CreateOpenAIChatCompletionStream creates a chat completion stream using OpenAI.
 func CreateOpenAIChatCompletionStream(
-	ctx context.Context,
+	cfg *Config,
+	logger *log.Logger,
 	apiKey string,
 	messages []openai.ChatCompletionMessage,
 	maxTokens int,
 ) <-chan string {
-	logger, _ := ctx.Value("logger").(*log.Logger)
-
 	responseChannel := make(chan string)
 
 	go func() {
@@ -117,16 +109,14 @@ func CreateOpenAIChatCompletionStream(
 
 // CreateAzureChatCompletionStream creates a chat completion stream using Azure.
 func CreateAzureChatCompletionStream(
-	ctx context.Context,
+	cfg *Config,
+	logger *log.Logger,
 	apiKey string,
 	azureURL string,
 	messages []openai.ChatCompletionMessage,
 	maxTokens int,
 ) <-chan string {
 	responseChannel := make(chan string)
-
-	logger, _ := ctx.Value("logger").(*log.Logger)
-
 	go func() {
 		defer close(responseChannel)
 
@@ -155,7 +145,6 @@ func CreateAzureChatCompletionStream(
 		stream, err := client.CreateChatCompletionStream(ctx, req)
 		if err != nil {
 			logger.WithFields(log.Fields{"error": err}).Error("openai api error")
-
 			return
 		}
 

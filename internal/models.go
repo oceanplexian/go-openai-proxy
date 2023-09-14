@@ -24,6 +24,15 @@ type Config struct {
 	CertFile  string              `yaml:"certFile"`
 	KeyFile   string              `yaml:"keyFile"`
 	UseTLS    bool                `yaml:"useTLS"`
+	LogConfig LogConfig           `yaml:"logConfig"`
+}
+
+type LogConfig struct {
+	LogOutput string `yaml:"logOutput"` // Can be "stdout" or "file"
+	Filepath  string `yaml:"filepath"`
+	Filesize  int64  `yaml:"filesize"`
+	FileCount int    `yaml:"fileCount"`
+	LogLevel  string `yaml:"logLevel"` // Log level like "info", "debug", "warn", etc.
 }
 
 type Message struct {

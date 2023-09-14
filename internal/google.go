@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,7 +16,7 @@ var (
 )
 
 // Interceptor function.
-func GoogleSearchInterceptor(ctx context.Context, requestData *RequestData) error {
+func GoogleSearchInterceptor(cfg *Config, logger *log.Logger, requestData *RequestData) error {
 	if requestData == nil {
 		return fmt.Errorf("%w", ErrRequestDataNil)
 	}
@@ -25,8 +24,6 @@ func GoogleSearchInterceptor(ctx context.Context, requestData *RequestData) erro
 	if requestData.Messages == nil {
 		return fmt.Errorf("%w", ErrRequestDataMessages)
 	}
-
-	logger, _ := ctx.Value("logger").(*log.Logger) // Type assertion for Logrus
 
 	for message := len(requestData.Messages) - 1; message >= 0; message-- {
 		// Experimental logic for searching Google
@@ -40,12 +37,15 @@ func GoogleSearchInterceptor(ctx context.Context, requestData *RequestData) erro
 			if startQuoteIndex != -1 && endQuoteIndex != -1 && startQuoteIndex < endQuoteIndex {
 				searchQuery := afterSearchPhrase[startQuoteIndex+1 : endQuoteIndex]
 
-				searchResult, err := PerformGoogleSearch(ctx, searchQuery)
+				searchResult, err := PerformGoogleSearch(cfg, logger, searchQuery)
+
 				if err == nil {
-					logger.WithFields(log.Fields{"result": searchResult}).Info("Google Result Found")
+					logger.WithFields(log.Fields{"result": searchResult}).Info("google result")
 
 					requestData.Messages[message].Content += "\n\nThe google search results are: ```" +
 						searchResult + "``` use them to answer the user's question."
+				} else {
+					logger.WithFields(log.Fields{"error": err}).Info("error fetching google result")
 				}
 
 				break
@@ -57,21 +57,24 @@ func GoogleSearchInterceptor(ctx context.Context, requestData *RequestData) erro
 }
 
 // Function to perform a Google search using the rocketlaunchr/google-search package.
-func PerformGoogleSearch(ctx context.Context, query string) (string, error) {
-	results, err := googlesearch.Search(ctx, query) // pass the context instead of nil
+func PerformGoogleSearch(cfg *Config, logger *log.Logger, query string) (string, error) {
+
+	results, err := googlesearch.Search(nil, query) // pass the context instead of nil
+	logger.WithFields(log.Fields{"results": results}).Info("raw google results")
+
 	if err != nil {
 		return "", fmt.Errorf("failed to perform Google search: %w", err) // Wrap the external error
 	}
 
 	// Convert the results to a string
-	var stringsBuilder strings.Builder
+	var searchResults strings.Builder
 	for i, result := range results {
-		stringsBuilder.WriteString(fmt.Sprintf("%d. %s - %s - %s\n", i+1, result.Title, result.URL, result.Description))
+		searchResults.WriteString(fmt.Sprintf("%d. %s - %s - %s\n", i+1, result.Title, result.URL, result.Description))
 
 		if i >= 4 { // Limit to top 5 results
 			break
 		}
 	}
 
-	return stringsBuilder.String(), nil
+	return searchResults.String(), nil
 }
