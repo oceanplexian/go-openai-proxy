@@ -81,21 +81,12 @@ func overrideListeners(cfg *internal.Config, cliListeners string) {
 
 		if !isValidFormat {
 			log.Error("Invalid listener format, skipping: ", cliListener)
-
 			continue
 		}
 
 		newListener := internal.Listener{Interface: parts[0], Port: parts[1]}
 		cfg.Listeners = append(cfg.Listeners, newListener)
 	}
-}
-
-func createContext(cfg *internal.Config, logger *log.Logger) context.Context {
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, "logger", logger)
-	ctx = context.WithValue(ctx, "config", cfg)
-
-	return ctx
 }
 
 // startListener uses a logger from the context for logging.
