@@ -1,39 +1,49 @@
 package internal
 
 import (
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"fmt"
+	"os"
+
+	log "github.com/sirupsen/logrus"
+	"golift.io/rotatorr"
+	"golift.io/rotatorr/timerotator"
 )
 
-func InitializeLogger(logLevel string) (*zap.Logger, error) {
-	var cfg zap.Config
-	if logLevel == "debug" {
-		cfg = zap.NewDevelopmentConfig()
-	} else {
-		cfg = zap.NewProductionConfig()
+var (
+	ErrInvalidFileSettings = fmt.Errorf("invalid file settings for log output")
+	ErrInvalidLogLevel     = fmt.Errorf("failed to parse log level")
+	ErrInvalidLogOutput    = fmt.Errorf("invalid log output setting")
+)
+
+// InitializeLogger initializes the logger with the given log level and other settings.
+func InitializeLogger(cfg *LogConfig) (*log.Logger, error) {
+	logger := log.New()
+	logger.SetFormatter(&log.JSONFormatter{})
+
+	// Parse log level
+	level, err := log.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		return nil, ErrInvalidLogLevel
 	}
 
-	cfg.Level = zap.NewAtomicLevelAt(zapLevel(logLevel))
-	return cfg.Build()
-}
+	logger.SetLevel(level)
 
-func zapLevel(level string) zapcore.Level {
-	switch level {
-	case "debug":
-		return zap.DebugLevel
-	case "info":
-		return zap.InfoLevel
-	case "warn":
-		return zap.WarnLevel
-	case "error":
-		return zap.ErrorLevel
-	case "dpanic":
-		return zap.DPanicLevel
-	case "panic":
-		return zap.PanicLevel
-	case "fatal":
-		return zap.FatalLevel
+	switch cfg.LogOutput {
+	case "stdout":
+		logger.SetOutput(os.Stdout)
+	case "file":
+		if cfg.Filepath == "" || cfg.Filesize == 0 || cfg.FileCount == 0 {
+			return nil, ErrInvalidFileSettings
+		}
+
+		logger.SetOutput(rotatorr.NewMust(&rotatorr.Config{
+			FileSize: cfg.Filesize,
+			Filepath: cfg.Filepath,
+			Rotatorr: &timerotator.Layout{FileCount: cfg.FileCount},
+		}))
 	default:
-		return zap.InfoLevel
+		return nil, ErrInvalidLogOutput
 	}
+
+	return logger, nil
 }

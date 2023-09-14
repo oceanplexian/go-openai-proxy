@@ -1,4 +1,3 @@
-// internal/models/models.go
 package internal
 
 import (
@@ -15,6 +14,7 @@ type Upstream struct {
 	URL      string `yaml:"url,omitempty"`
 	Model    string `yaml:"model"`
 	Priority int    `yaml:"priority"`
+	APIKey   string `yaml:"apiKey"`
 }
 
 type Config struct {
@@ -24,6 +24,15 @@ type Config struct {
 	CertFile  string              `yaml:"certFile"`
 	KeyFile   string              `yaml:"keyFile"`
 	UseTLS    bool                `yaml:"useTLS"`
+	LogConfig LogConfig           `yaml:"logConfig"`
+}
+
+type LogConfig struct {
+	LogOutput string `yaml:"logOutput"` // Can be "stdout" or "file"
+	Filepath  string `yaml:"filepath"`
+	Filesize  int64  `yaml:"filesize"`
+	FileCount int    `yaml:"fileCount"`
+	LogLevel  string `yaml:"logLevel"` // Log level like "info", "debug", "warn", etc.
 }
 
 type Message struct {
@@ -38,7 +47,7 @@ type RequestData struct {
 	Messages    []openai.ChatCompletionMessage `json:"messages"`
 }
 
-type JsonResponse struct {
+type JSONResponse struct {
 	ID      string                 `json:"id"`
 	Object  string                 `json:"object"`
 	Created int64                  `json:"created"`
@@ -54,7 +63,6 @@ type Choice struct {
 	Delta        map[string]string `json:"delta"`
 }
 
-// Create a struct to represent the closing response
 type ClosingResponse struct {
 	ID      string                 `json:"id"`
 	Object  string                 `json:"object"`
