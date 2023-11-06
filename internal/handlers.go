@@ -53,14 +53,14 @@ func handleRequestType(
 	requestData RequestData,
 ) {
 	switch {
-	case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+	case strings.HasSuffix(request.URL.Path, "/chat/completions"):
 		requestData.RequestType = "chat"
 		handleChatCompletion(cfg, logger, writer, request, requestData)
-	case strings.HasSuffix(r.URL.Path, "/completions"):
+	case strings.HasSuffix(request.URL.Path, "/completions"):
 		requestData.RequestType = "completion"
 		handleTextCompletion(cfg, logger, writer, request, requestData)
 	default:
-		http.Error(w, "Unknown endpoint", http.StatusNotFound)
+		http.Error(writer, "Unknown endpoint", http.StatusNotFound)
 	}
 }
 
