@@ -17,8 +17,16 @@ var (
 
 // Interceptor function.
 func GoogleSearchInterceptor(cfg *Config, logger *log.Logger, requestData *RequestData) error {
+	logger.WithFields(log.Fields{"raw_request": requestData}).Info("Received request data")
+
 	if requestData == nil {
 		return fmt.Errorf("%w", ErrRequestDataNil)
+	}
+
+	if requestData.RequestType == "completion" {
+		// Handle completion type request logic here if needed
+		// For now, we just return
+		return nil
 	}
 
 	if requestData.Messages == nil {

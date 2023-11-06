@@ -89,10 +89,10 @@ func ReadAndUnmarshalBody(cfg *Config, logger *log.Logger, resp http.ResponseWri
 	return requestData, nil
 }
 
-func createJSONResponse(content string, isClosing bool) JSONResponse {
+func createJSONResponse(content string, responseType string, isClosing bool) JSONResponse {
 	commonFields := JSONResponse{
 		ID:      "chatcmpl-1692118020279965440",
-		Object:  "chat.completions.chunk",
+		Object:  responseType, // This can be "chat.completion" or "text_completion"
 		Created: 1692118020,
 		Model:   "Nous-Hermes-Llama2-GPTQ",
 		Usage: map[string]interface{}{
@@ -102,34 +102,44 @@ func createJSONResponse(content string, isClosing bool) JSONResponse {
 		},
 	}
 
-	if isClosing {
-		commonFields.Choices = []Choice{
-			{
-				Index:        0,
-				FinishReason: "stop",
-				Message: map[string]string{
-					"role":    "assistant",
-					"content": "", // Empty Content sent to the Client
+	if responseType == "chat.completion" {
+		if isClosing {
+			commonFields.Choices = []Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: map[string]string{
+						"role":    "assistant",
+						"content": "", // Empty Content sent to the Client
+					},
+					Delta: map[string]string{
+						"role":    "assistant",
+						"content": "", // Empty Content sent to the Client
+					},
 				},
-				Delta: map[string]string{
-					"role":    "assistant",
-					"content": "", // Empty Content sent to the Client
+			}
+		} else {
+			commonFields.Choices = []Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: map[string]string{
+						"role":    "assistant",
+						"content": content,
+					},
+					Delta: map[string]string{
+						"role":    "assistant",
+						"content": content,
+					},
 				},
-			},
+			}
 		}
-	} else {
+	} else if responseType == "text_completion" {
 		commonFields.Choices = []Choice{
 			{
 				Index:        0,
-				FinishReason: "stop",
-				Message: map[string]string{
-					"role":    "assistant",
-					"content": content,
-				},
-				Delta: map[string]string{
-					"role":    "assistant",
-					"content": content,
-				},
+				FinishReason: "length", // This can be modified if needed
+				Text:         content,
 			},
 		}
 	}
@@ -138,13 +148,20 @@ func createJSONResponse(content string, isClosing bool) JSONResponse {
 }
 
 // Create a function to send JSONResponse.
-func sendJSONResponse(writer http.ResponseWriter, resp JSONResponse, flusher http.Flusher) {
+func sendJSONResponse(writer http.ResponseWriter, resp JSONResponse, flusher http.Flusher, mode string) {
 	data, err := json.Marshal(resp)
 	if err != nil {
 		http.Error(writer, "Error creating JSON response", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Fprintf(writer, "data: %s\r\n\r\n", data)
+	// Conditionally prepend "data:" based on the mode
+	if mode == "chat" {
+		fmt.Fprintf(writer, "data: %s\r\n\r\n", data)
+	} else {
+		// For completion mode, send the JSON without "data:"
+		fmt.Fprintf(writer, "%s\r\n\r\n", data)
+	}
+
 	flusher.Flush()
 }

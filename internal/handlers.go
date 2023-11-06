@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,9 +19,9 @@ var interceptors = []RequestInterceptor{
 }
 
 // Prevent Content-Security-Policy Errors when used with webapps served from a different domain.
-func SetCommonHeaders(w http.ResponseWriter) {
+func SetCommonHeaders(w http.ResponseWriter, contentType string) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.Header().Set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,POST,PUT")
 	w.Header().Set("Access-Control-Allow-Headers", `
@@ -34,7 +35,7 @@ func SetCommonHeaders(w http.ResponseWriter) {
 }
 
 func HandleOptionsRequest(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
+	SetCommonHeaders(w, "application/json") // Use the refactored function
 	w.WriteHeader(http.StatusOK)
 	_, err := w.Write([]byte("OK"))
 
@@ -43,8 +44,33 @@ func HandleOptionsRequest(w http.ResponseWriter) {
 	}
 }
 
-func Response(cfg *Config, logger *log.Logger, w http.ResponseWriter, r *http.Request) {
-	SetCommonHeaders(w)
+// New function to handle different request types
+func handleRequestType(
+	cfg *Config,
+	logger *log.Logger,
+	writer http.ResponseWriter,
+	request *http.Request,
+	requestData RequestData,
+) {
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+		requestData.RequestType = "chat"
+		handleChatCompletion(cfg, logger, writer, request, requestData)
+	case strings.HasSuffix(r.URL.Path, "/completions"):
+		requestData.RequestType = "completion"
+		handleTextCompletion(cfg, logger, writer, request, requestData)
+	default:
+		http.Error(w, "Unknown endpoint", http.StatusNotFound)
+	}
+}
+
+func Response(
+	cfg *Config,
+	logger *log.Logger,
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	SetCommonHeaders(w, "text/event-stream") // Stream is the default assumed
 
 	if r.Method == "OPTIONS" {
 		HandleOptionsRequest(w)
@@ -53,76 +79,89 @@ func Response(cfg *Config, logger *log.Logger, w http.ResponseWriter, r *http.Re
 
 	requestData, err := ReadAndUnmarshalBody(cfg, logger, w, r)
 	if err != nil {
-		logger.WithFields(log.Fields{"error": err}).Error("Error reading or parsing request body")
+		handleError(w, logger, err, "Error reading or parsing request body")
 		return
 	}
 
-	// Run through interceptors
-	for _, interceptor := range interceptors {
-		if err := interceptor(cfg, logger, &requestData); err != nil {
-			logger.WithFields(log.Fields{"error": err}).Error("Error running interceptor")
-			return
-		}
-	}
-	// Create a Response Channel between Client and Upstream
-	// Here, upstreamName would be a string that you capture once at the start,
-	// assuming all segments in the conversation are from the same upstream
+	// Determine and handle the request type
+	handleRequestType(cfg, logger, w, r, requestData)
 
-	responseChannel, upstreamName := CreateChatCompletionStream(cfg, logger, cfg.Upstreams, requestData.Messages, requestData.MaxTokens)
+}
+
+// HandleChatCompletion handles the logic specific to chat completions.
+func handleChatCompletion(cfg *Config, logger *log.Logger, w http.ResponseWriter, r *http.Request, requestData RequestData) {
+	responseChannel, upstreamName := CreateOpenAIRequest(cfg, logger, requestData.RequestType, requestData.Messages, requestData.Prompt, requestData.MaxTokens)
+	sendResponseFromChannel(w, responseChannel, upstreamName, logger, "chat", requestData)
+}
+
+// HandleTextCompletion handles the logic specific to text completions.
+func handleTextCompletion(cfg *Config, logger *log.Logger, w http.ResponseWriter, r *http.Request, requestData RequestData) {
+	responseChannel, upstreamName := CreateOpenAIRequest(cfg, logger, requestData.RequestType, requestData.Messages, requestData.Prompt, requestData.MaxTokens)
+	sendResponseFromChannel(w, responseChannel, upstreamName, logger, "completion", requestData)
+}
+
+// sendResponseFromChannel handles sending the response to the client from the response channel.
+func sendResponseFromChannel(w http.ResponseWriter, responseChannel <-chan string, upstreamName string, logger *log.Logger, requestType string, requestData RequestData) {
 	flusher, ok := w.(http.Flusher)
-
 	if !ok {
-		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		handleError(w, logger, errors.New("streaming not supported"), "Streaming not supported")
 		return
 	}
 
-	flusher.Flush()
-
-	// Iterate over the Upstream Streaming Output, and deliver it to the client
 	var accumulatedContents []string
-
 	for content := range responseChannel {
-		// Log individual segments along with upstream name
-		logger.WithFields(log.Fields{
-			"content":      content,
-			"upstreamName": upstreamName, // Add upstream name here
-		}).Debug("JSON Response Segment")
-
 		accumulatedContents = append(accumulatedContents, content)
-
-		resp := createJSONResponse(content, false)
-		sendJSONResponse(w, resp, flusher)
+		responseType := getResponseType(requestType)
+		resp := createJSONResponse(content, responseType, false)
+		sendJSONResponse(w, resp, flusher, requestType)
 	}
 
+	// After the channel is closed, send the final response.
+	sendFinalResponse(w, accumulatedContents, upstreamName, logger, requestType, flusher, requestData)
+}
+
+// sendFinalResponse sends the final response after all the streaming content has been sent.
+func sendFinalResponse(w http.ResponseWriter, accumulatedContents []string, upstreamName string, logger *log.Logger, requestType string, flusher http.Flusher, requestData RequestData) {
 	completedResponse := strings.Join(accumulatedContents, "")
 	finalContentMap := map[string]interface{}{
 		"completedResponse": completedResponse,
 		"requestMessages":   requestData.Messages,
 	}
 	jsonFinalContent, err := json.Marshal(finalContentMap)
-
 	if err != nil {
-		logger.WithFields(log.Fields{"error": err}).Error("Failed to marshal final content to JSON")
+		handleError(w, logger, err, "Failed to marshal final content to JSON")
 		return
 	}
 
 	logger.WithFields(log.Fields{
 		"response":     string(jsonFinalContent),
-		"upstreamName": upstreamName, // Add upstream name here
+		"upstreamName": upstreamName,
 	}).Info("JSON Completed Response")
 
-	closingResp := createJSONResponse("", true)
-	closingData, err := json.Marshal(closingResp)
-
-	if err != nil {
-		logger.WithFields(log.Fields{"error": err}).Error("Failed to marshal final content to JSON")
-		return
+	if requestType == "chat" {
+		closingResp := createJSONResponse("", "chat.completion", true)
+		closingData, err := json.Marshal(closingResp)
+		if err != nil {
+			handleError(w, logger, err, "Failed to marshal final content to JSON")
+			return
+		}
+		fmt.Fprintf(w, "data: %s\r\n\r\n", closingData)
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\r\n\r\n")
 	}
-
-	// Some magic text we need to send to close the HTTP stream
-	fmt.Fprintf(w, "data: %s\r\n\r\n", closingData)
-	flusher.Flush()
-
-	fmt.Fprintf(w, "data: [DONE]\r\n\r\n")
 	flusher.Flush() // Ensure all data is sent before closing
+}
+
+// getResponseType determines the response type based on the request type.
+func getResponseType(requestType string) string {
+	if requestType == "chat" {
+		return "chat.completion"
+	}
+	return "text_completion"
+}
+
+// New function to handle errors consistently
+func handleError(w http.ResponseWriter, logger *log.Logger, err error, contextMessage string) {
+	logger.WithFields(log.Fields{"error": err}).Error(contextMessage)
+	http.Error(w, contextMessage, http.StatusInternalServerError)
 }

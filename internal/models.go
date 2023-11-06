@@ -20,7 +20,6 @@ type Upstream struct {
 type Config struct {
 	Upstreams map[string]Upstream `yaml:"upstreams"`
 	Listeners []Listener          `yaml:"listeners"`
-	LogLevel  string              `yaml:"logLevel"`
 	CertFile  string              `yaml:"certFile"`
 	KeyFile   string              `yaml:"keyFile"`
 	UseTLS    bool                `yaml:"useTLS"`
@@ -41,6 +40,8 @@ type Message struct {
 }
 
 type RequestData struct {
+	RequestType string                         `json:"requestType"`
+	Prompt      string                         `json:"prompt,omitempty"`
 	Model       string                         `json:"model"`
 	Temperature float64                        `json:"temperature"`
 	MaxTokens   int                            `json:"maxTokens"`
@@ -59,6 +60,7 @@ type JSONResponse struct {
 type Choice struct {
 	Index        int               `json:"index"`
 	FinishReason string            `json:"finish_reason"`
+	Text         string            `json:"text"`
 	Message      map[string]string `json:"message"`
 	Delta        map[string]string `json:"delta"`
 }
